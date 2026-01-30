@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Chat</title>
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .chat-container {
+            width: 100%;
+            max-width: 500px;
+            height: 80vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            font-size: 14px;
+            line-height: 1.4;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .my-message {
+            background: #667eea;
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 5px;
+        }
+        
+        .other-message {
+            background: #e9ecef;
+            color: #333;
+            border-bottom-left-radius: 5px;
+        }
+        
+        .message-sender {
+            font-weight: bold;
+            margin-bottom: 4px;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+        
+        .chat-input {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .chat-input input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        .chat-input input:focus {
+            border-color: #667eea;
+        }
+        
+        .chat-input button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .chat-input button:hover {
+            transform: translateY(-2px);
+        }
+        
+        .chat-input button:active {
+            transform: translateY(0);
+        }
+        
+        .status {
+            text-align: center;
+            padding: 10px;
+            font-size: 12px;
+            color: #666;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .connected {
+            color: #28a745;
+        }
+        
+        .disconnected {
+            color: #dc3545;
+        }
+        
+        /* Scrollbar styling */
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .chat-messages::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 10px;
+        }
+        
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            💬 Live Chat
+        </div>
+        
+        <div class="status" id="status">
+            <span id="connectionStatus">Connecting...</span>
+            <span id="userCount"></span>
+        </div>
+        
+        <div class="chat-messages" id="messages">
+            <!-- Messages will appear here -->
+        </div>
+        
+        <div class="chat-input">
+            <input type="text" id="nameInput" placeholder="Your name..." value="User">
+            <input type="text" id="messageInput" placeholder="Type your message...">
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script>
+        // Get DOM elements
+        const messagesContainer = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+        const nameInput = document.getElementById('nameInput');
+        const sendButton = document.getElementById('sendButton');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const userCount = document.getElementById('userCount');
+        
+        // Connect to Socket.io server
+        // For local development (backend on same machine)
+        const socket = io('http://localhost:4000');
+        
+        // For Android emulator testing
+        // const socket = io('http://10.0.2.2:4000');
+        
+        // Connection status
+        socket.on('connect', () => {
+            console.log('✅ Connected to server');
+            connectionStatus.textContent = 'Connected';
+            connectionStatus.className = 'connected';
+        });
+        
+        socket.on('disconnect', () => {
+            console.log('❌ Disconnected from server');
+            connectionStatus.textContent = 'Disconnected';
+            connectionStatus.className = 'disconnected';
+        });
+        
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            connectionStatus.textContent = 'Connection failed';
+            connectionStatus.className = 'disconnected';
+        });
+        
+        // Load chat history when connected
+        socket.on('chat_history', (messages) => {
+            console.log('Loaded', messages.length, 'previous messages');
+            messages.forEach(addMessage);
+            scrollToBottom();
+        });
+        
+        // Receive new messages
+        socket.on('receive_message', (message) => {
+            console.log('New message received:', message);
+            addMessage(message);
+            scrollToBottom();
+        });
+        
+        // User count updates (optional)
+        socket.on('user_count', (count) => {
+            userCount.textContent = ` • ${count} user${count !== 1 ? 's' : ''} online`;
+        });
+        
+        // Error handling
+        socket.on('error', (error) => {
+            console.error('Server error:', error);
+            alert('Error: ' + (error.message || 'Something went wrong'));
+        });
+        
+        // Add message to UI
+        function addMessage(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            
+            // Check if this message is from current user
+            const isMyMessage = message.sender === nameInput.value.trim();
+            messageDiv.classList.add(isMyMessage ? 'my-message' : 'other-message');
+            
+            // Create message content
+            messageDiv.innerHTML = `
+                <div class="message-sender">${message.sender}</div>
+                <div class="message-text">${message.message}</div>
+                <div class="message-time" style="font-size: 10px; opacity: 0.6; margin-top: 4px; text-align: right;">
+                    ${new Date(message.timestamp || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                </div>
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+        }
+        
+        // Send message function
+        function sendMessage() {
+            const sender = nameInput.value.trim();
+            const message = messageInput.value.trim();
+            
+            if (!sender) {
+                alert('Please enter your name');
+                nameInput.focus();
+                return;
+            }
+            
+            if (!message) {
+                alert('Please enter a message');
+                messageInput.focus();
+                return;
+            }
+            
+            // Emit message to server
+            socket.emit('send_message', {
+                sender: sender,
+                message: message
+            });
+            
+            // Clear input and focus
+            messageInput.value = '';
+            messageInput.focus();
+        }
+        
+        // Scroll to bottom of messages
+        function scrollToBottom() {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        // Event listeners
+        sendButton.addEventListener('click', sendMessage);
+        
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        nameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                messageInput.focus();
+            }
+        });
+        
+        // Focus on message input on load
+        window.addEventListener('load', () => {
+            messageInput.focus();
+        });
+    </script>
+</body>
+</html>

@@ -1,14 +1,36 @@
 import mongoose from 'mongoose';
 
-// Define the schema
 const userSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-}, { timestamps: true });
+  username: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true
+  },
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
+  password: {
+    type: String,
+    required: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
 
-// Create the model
+// NO PRE-SAVE MIDDLEWARE - We'll handle hashing in controller
+
+// Compare password method (optional - can also do in controller)
+userSchema.methods.comparePassword = async function(candidatePassword) {
+  const bcrypt = await import('bcrypt');
+  return await bcrypt.compare(candidatePassword, this.password);
+};
+
 const User = mongoose.model('User', userSchema);
-
-// Export the model
 export default User;

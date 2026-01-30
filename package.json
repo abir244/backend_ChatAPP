@@ -4,11 +4,10 @@
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-  "start": "node src/index.js",
-  "serve-frontend": "http-server frontend -c-1",
-  "dev": "concurrently \"npm run start\" \"npm run serve-frontend\""
-},
-
+    "start": "node src/index.js",
+    "serve-frontend": "http-server frontend -c-1",
+    "dev": "concurrently \"npm run start\" \"npm run serve-frontend\""
+  },
   "dependencies": {
     "bcrypt": "^6.0.0",
     "dotenv": "^17.2.3",
@@ -17,7 +16,7 @@
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11",
-    "concurrently": "^8.2.0"
+    "concurrently": "^8.2.0",
+    "nodemon": "^3.1.11"
   }
 }
