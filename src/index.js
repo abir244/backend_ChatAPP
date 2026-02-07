@@ -1,100 +1,145 @@
-// src/index.js - SIMPLE WORKING VERSION
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import http from "http";
+import { Server } from "socket.io";
+import app from "./app.js";
+import connectDB from "./config/database.js";
+import { saveMessage, getMessagesByRoom } from "./controllers/chatController.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// ✅ NEW import
+import Conversation from "./models/conversationModel.js";
 
-// 1. MANUALLY LOAD .env FILE - GUARANTEED TO WORK
-console.log('=== Loading environment ===');
-try {
-  const envPath = resolve(__dirname, '..', '.env');
-  console.log('Looking for .env at:', envPath);
-  
-  const content = readFileSync(envPath, 'utf8');
-  console.log('✅ .env file found and readable');
-  
-  const lines = content.split('\n');
-  let loadedCount = 0;
-  
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#')) {
-      const equalsIndex = trimmed.indexOf('=');
-      if (equalsIndex > 0) {
-        const key = trimmed.substring(0, equalsIndex).trim();
-        const value = trimmed.substring(equalsIndex + 1).trim();
-        process.env[key] = value;
-        loadedCount++;
-        console.log(`   Loaded: ${key}`);
-      }
-    }
-  }
-  
-  console.log(`✅ Loaded ${loadedCount} environment variables\n`);
-} catch (error) {
-  console.error('❌ CRITICAL: Cannot load .env file:', error.message);
-  console.error('Make sure .env file exists in project root');
-  process.exit(1);
-}
-
-// 2. NOW IMPORT EVERYTHING ELSE
-import http from 'http';
-import { Server } from 'socket.io';
-import app from './app.js';
-import connectDB from './config/database.js';
-import { saveMessage, getMessages } from './controllers/chatController.js';
-
-// 3. VERIFY ENVIRONMENT IS LOADED
-console.log('=== Environment Verification ===');
-console.log('PORT:', process.env.PORT);
-console.log('MONGODB_URI exists:', !!process.env.MONGODB_URI);
-
-if (!process.env.MONGODB_URI) {
-  console.error('❌ MONGODB_URI is not defined!');
-  process.exit(1);
-}
-
-// 4. CONNECT TO DATABASE
-console.log('\n=== Database Connection ===');
-connectDB();
-
-// 5. START SERVER
 const PORT = process.env.PORT || 4000;
-const server = http.createServer(app);
 
+const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*' }
+  cors: { origin: "*" },
 });
 
-io.on('connection', async (socket) => {
+// ✅ helper
+function generateRoomCode(length = 6) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < length; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
+io.on("connection", (socket) => {
   console.log(`✅ User connected: ${socket.id}`);
 
-  try {
-    const messages = await getMessages();
-    socket.emit('chat_history', messages);
-    console.log(`📜 Sent ${messages.length} messages to ${socket.id}`);
-  } catch (err) {
-    console.error('❌ Error fetching chat history:', err);
-  }
+  // ✅ existing join_room (keep)
+  socket.on("join_room", async (conversationId) => {
+    socket.join(conversationId);
+    console.log(`👤 User joined room: ${conversationId}`);
 
-  socket.on('send_message', async (data) => {
     try {
-      const saved = await saveMessage(data);
-      io.emit('receive_message', saved);
+      const messages = await getMessagesByRoom(conversationId);
+      socket.emit("chat_history", messages);
     } catch (err) {
-      console.error('❌ Error saving message:', err);
+      console.error("❌ Error fetching history:", err.message);
+      socket.emit("error", { message: "Failed to load chat history" });
     }
   });
 
-  socket.on('disconnect', () => {
+  // ✅ NEW: Create room -> returns {roomId, roomName, code}
+  socket.on("create_room", async ({ roomName, creatorId }) => {
+    try {
+      if (!roomName || roomName.trim().length < 2) {
+        socket.emit("room_error", { message: "Room name is too short" });
+        return;
+      }
+
+      // generate unique code
+      let code = generateRoomCode();
+      while (await Conversation.exists({ code })) {
+        code = generateRoomCode();
+      }
+
+      const room = await Conversation.create({
+        name: roomName.trim(),
+        code,
+        createdBy: creatorId || null,
+        members: creatorId ? [creatorId] : [],
+      });
+
+      const roomId = room._id.toString();
+
+      // join creator to room immediately
+      socket.join(roomId);
+
+      socket.emit("room_created", {
+        roomId,
+        roomName: room.name,
+        code: room.code,
+      });
+    } catch (err) {
+      console.error("❌ create_room error:", err.message);
+      socket.emit("room_error", { message: "Failed to create room" });
+    }
+  });
+
+  // ✅ NEW: Join room by code -> returns {roomId, roomName}
+  socket.on("join_room_by_code", async ({ code, userId }) => {
+    try {
+      if (!code || code.trim().length < 4) {
+        socket.emit("join_error", { message: "Invalid code" });
+        return;
+      }
+
+      const room = await Conversation.findOne({ code: code.trim().toUpperCase() });
+      if (!room) {
+        socket.emit("join_error", { message: "Room code not found" });
+        return;
+      }
+
+      // optional: add member
+      if (userId) {
+        const exists = room.members?.some((m) => m.toString() === userId);
+        if (!exists) {
+          room.members.push(userId);
+          await room.save();
+        }
+      }
+
+      const roomId = room._id.toString();
+      socket.join(roomId);
+
+      // send history as well (same as join_room)
+      const messages = await getMessagesByRoom(roomId);
+      socket.emit("chat_history", messages);
+
+      socket.emit("joined_room", {
+        roomId,
+        roomName: room.name,
+      });
+    } catch (err) {
+      console.error("❌ join_room_by_code error:", err.message);
+      socket.emit("join_error", { message: "Failed to join room" });
+    }
+  });
+
+  // ✅ existing send_message (keep)
+  socket.on("send_message", async (data) => {
+    try {
+      const saved = await saveMessage(data);
+      io.to(data.conversationId).emit("receive_message", saved);
+    } catch (err) {
+      console.error("❌ Error saving message:", err.message);
+      socket.emit("error", { message: "Failed to save message" });
+    }
+  });
+
+  socket.on("disconnect", () => {
     console.log(`❌ User disconnected: ${socket.id}`);
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`\n🚀 Server running on http://localhost:${PORT}`);
-  console.log('========================================');
-});
+connectDB()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("❌ Failed to connect to DB:", err.message);
+  });
