@@ -1,18 +1,30 @@
 import http from "http";
 import { Server } from "socket.io";
+
 import app from "./app.js";
 import connectDB from "./config/database.js";
 import { saveMessage, getMessagesByRoom } from "./controllers/chatController.js";
-
-// ✅ NEW import
 import Conversation from "./models/conversationModel.js";
 
-const PORT = process.env.PORT || 8000;
+// ✅ Railway injects PORT automatically
+const PORT = process.env.PORT || 8080;
 
 const server = http.createServer(app);
+
+// ✅ Socket.IO
 const io = new Server(server, {
   cors: { origin: "*" },
 });
+
+// ✅ Start listening FIRST (prevents Railway 502 during DB connect)
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
+
+// ✅ Then connect DB (do not block listening)
+connectDB()
+  .then(() => console.log("✅ MongoDB connected"))
+  .catch((err) => console.error("❌ Failed to connect to DB:", err.message));
 
 // ✅ helper
 function generateRoomCode(length = 6) {
@@ -41,7 +53,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ NEW: Create room -> returns {roomId, roomName, code}
+  // ✅ Create room
   socket.on("create_room", async ({ roomName, creatorId }) => {
     try {
       if (!roomName || roomName.trim().length < 2) {
@@ -49,7 +61,6 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // generate unique code
       let code = generateRoomCode();
       while (await Conversation.exists({ code })) {
         code = generateRoomCode();
@@ -64,7 +75,6 @@ io.on("connection", (socket) => {
 
       const roomId = room._id.toString();
 
-      // join creator to room immediately
       socket.join(roomId);
 
       socket.emit("room_created", {
@@ -78,7 +88,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ NEW: Join room by code -> returns {roomId, roomName}
+  // ✅ Join room by code
   socket.on("join_room_by_code", async ({ code, userId }) => {
     try {
       if (!code || code.trim().length < 4) {
@@ -86,13 +96,15 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const room = await Conversation.findOne({ code: code.trim().toUpperCase() });
+      const room = await Conversation.findOne({
+        code: code.trim().toUpperCase(),
+      });
+
       if (!room) {
         socket.emit("join_error", { message: "Room code not found" });
         return;
       }
 
-      // optional: add member
       if (userId) {
         const exists = room.members?.some((m) => m.toString() === userId);
         if (!exists) {
@@ -104,7 +116,6 @@ io.on("connection", (socket) => {
       const roomId = room._id.toString();
       socket.join(roomId);
 
-      // send history as well (same as join_room)
       const messages = await getMessagesByRoom(roomId);
       socket.emit("chat_history", messages);
 
@@ -118,7 +129,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ existing send_message (keep)
+  // ✅ send_message
   socket.on("send_message", async (data) => {
     try {
       const saved = await saveMessage(data);
@@ -133,13 +144,3 @@ io.on("connection", (socket) => {
     console.log(`❌ User disconnected: ${socket.id}`);
   });
 });
-
-connectDB()
-  .then(() => {
-    server.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error("❌ Failed to connect to DB:", err.message);
-  });
