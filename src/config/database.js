@@ -1,13 +1,19 @@
-import mongoose from 'mongoose';
-import 'dotenv/config';
+import mongoose from "mongoose";
+import "dotenv/config";
+
+let isConnecting = false;
 
 const connectDB = async () => {
+  if (mongoose.connection.readyState === 1) return; // already connected
+  if (mongoose.connection.readyState === 2 || isConnecting) return; // connecting
+
+  isConnecting = true;
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log('✅ MongoDB connected');
-  } catch (err) {
-    console.error('❌ MongoDB connection failed:', err.message);
-    process.exit(1);
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+    });
+  } finally {
+    isConnecting = false;
   }
 };
 

@@ -16,12 +16,12 @@ const io = new Server(server, {
   cors: { origin: "*" },
 });
 
-// ✅ Start listening FIRST (prevents Railway 502 during DB connect)
+// ✅ Start listening FIRST (Railway can reach your app immediately)
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
 
-// ✅ Then connect DB (do not block listening)
+// ✅ Connect DB after server is already reachable
 connectDB()
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("❌ Failed to connect to DB:", err.message));
@@ -39,7 +39,6 @@ function generateRoomCode(length = 6) {
 io.on("connection", (socket) => {
   console.log(`✅ User connected: ${socket.id}`);
 
-  // ✅ existing join_room (keep)
   socket.on("join_room", async (conversationId) => {
     socket.join(conversationId);
     console.log(`👤 User joined room: ${conversationId}`);
@@ -53,7 +52,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ Create room
   socket.on("create_room", async ({ roomName, creatorId }) => {
     try {
       if (!roomName || roomName.trim().length < 2) {
@@ -74,7 +72,6 @@ io.on("connection", (socket) => {
       });
 
       const roomId = room._id.toString();
-
       socket.join(roomId);
 
       socket.emit("room_created", {
@@ -88,7 +85,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ Join room by code
   socket.on("join_room_by_code", async ({ code, userId }) => {
     try {
       if (!code || code.trim().length < 4) {
@@ -129,7 +125,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ send_message
   socket.on("send_message", async (data) => {
     try {
       const saved = await saveMessage(data);
