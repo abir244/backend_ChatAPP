@@ -7,7 +7,7 @@ import { saveMessage, getMessagesByRoom } from "./controllers/chatController.js"
 // ✅ NEW import
 import Conversation from "./models/conversationModel.js";
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 8000;
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -136,7 +136,7 @@ io.on("connection", (socket) => {
 
 connectDB()
   .then(() => {
-    server.listen(PORT, () => {
+    server.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
   })
